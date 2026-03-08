@@ -1,0 +1,260 @@
+#!/bin/sh
+cd ${0%/*} || exit 1
+
+. $WM_PROJECT_DIR/bin/tools/RunFunctions
+
+# Copy solid.stl from parent directory to constant/triSurface
+mkdir -p constant/triSurface
+cp ../solid.stl constant/triSurface/
+
+./Allclean
+
+export OMPI_MCA_orte_set_default_slots=$(getNumberOfProcessors)
+export OMPI_MCA_prte_set_default_slots=$(getNumberOfProcessors)
+show_help() {
+    echo "Usage: Allrun [OPTIONS]"
+    echo "options:"
+    echo "  -m, --onlyMesh  make only meshes"
+    echo "  -h, --help      print the usage"
+    echo "  -i, --info      show project information"
+    echo ""
+    exit 1
+}
+show_info() {
+    echo "This project was exported from XSim (https://xsim.work)."
+    echo "For OpenFOAM 12."
+    echo ""
+    exit 1
+}
+get_num_labels() ( set -f; set -- $1; echo $# )
+monitor() {
+    local solverPID=$1
+    local logFile=$2
+    
+    while [ ! -f $logFile ]; do
+        sleep 1
+    done
+    while [ $(wc -l < "$logFile") -lt 5 ]; do
+        sleep 1
+    done
+    
+    # Note that the numLabels includes "#"
+    local labels
+    labels=$(grep -E '^#' $logFile | tail -1)
+    if [ "x$labels" = "x" ]; then
+        labels="# Step"
+    fi
+    local numLabels=$(get_num_labels "$labels")
+    local numColumn=$(tail -2 $logFile | head -1 | awk '{print NF}')
+    
+    local i=0
+    while [ "$numLabels" -le "$numColumn" ]; do
+        i=$(expr $i + 1)
+        labels="$labels data$i"
+        numLabels=$(get_num_labels "$labels")
+    done
+    
+    local xAxisLabel=$(echo $labels | cut -d " " -f2)
+    labels=$(echo $labels | cut -d " " -f3-)
+    
+    local gnuplotFile=$(mktemp)
+    echo "set term x11 1 font \"helvetica,17\" linewidth 1.5 persist noraise" > $gnuplotFile
+    echo "set logscale y" >> $gnuplotFile
+    echo "set title \"Residuals\"" >> $gnuplotFile
+    echo "set xlabel \"$xAxisLabel\"" >> $gnuplotFile
+    echo "while (1) {" >> $gnuplotFile
+    echo "plot \\" >> $gnuplotFile
+    local field
+    local line
+    i=1
+    for field in $labels; do
+        i=$(expr $i + 1)
+        line="\"$logFile\" using 1:${i} with lines title \"$field\""
+        if [ $i -lt $numColumn ]; then
+           line="$line, \\"
+        fi
+        echo $line >> $gnuplotFile
+    done
+    echo "pause 1" >> $gnuplotFile
+    echo "}" >> $gnuplotFile
+    
+    touch $logFile
+    gnuplot $gnuplotFile &
+    local gnuplotPID=$!
+    
+    while ps -p $solverPID > /dev/null; do
+        sleep 1
+    done
+    
+    sleep 5
+    kill -9 $gnuplotPID
+    rm $gnuplotFile
+}
+optionOld=$OPTIND
+OPTIND=1
+onlyMesh=0
+while getopts "ihm-:" opt; do
+    case "$opt" in
+    -)
+        case "${OPTARG}" in
+            info) show_info;;
+            help) show_help;;
+            onlyMesh) onlyMesh=true;;
+        esac ;;
+    i) show_info;;
+    m) onlyMesh=true;;
+    h) show_help;;
+    esac
+done
+shift $((OPTIND-1))
+OPTIND=$optionOld
+runApplication blockMesh
+runApplication surfaceFeatures
+
+runApplication -s "meshing" decomposePar
+runParallel snappyHexMesh -overwrite
+runApplication -s "meshing" reconstructPar -constant
+rm -rf ./processor*
+if [ "$onlyMesh" = true ] ; then
+    exit 0
+fi
+
+runApplication decomposePar
+residualsFile="postProcessing/residuals(U,p,k,epsilon)/0/residuals.dat"
+if [ -f $residualsFile ] ; then
+    rm -f $residualsFile
+fi
+
+runParallel $(getApplication)
+
+# residualsFileを読み取ってgnuplotで描画
+if [ -f "$residualsFile" ]; then
+    echo ""
+    echo "========================================="
+    echo "Residualsをgnuplotで描画中..."
+    echo "========================================="
+    
+    # ヘッダー行から列名を取得
+    labels=$(grep -E '^#' "$residualsFile" | tail -1)
+    if [ "x$labels" = "x" ]; then
+        labels="# Step"
+    fi
+    
+    # 列数を取得
+    numColumn=$(tail -2 "$residualsFile" | head -1 | awk '{print NF}')
+    
+    # x軸ラベルを取得（2列目）
+    xAxisLabel=$(echo $labels | awk '{print $2}')
+    if [ "x$xAxisLabel" = "x" ]; then
+        xAxisLabel="Step"
+    fi
+    
+    # gnuplotスクリプトを作成
+    gnuplotScript=$(mktemp)
+    echo "set term pngcairo size 1200,800 font \"helvetica,14\"" > $gnuplotScript
+    echo "set output 'residuals.png'" >> $gnuplotScript
+    echo "set logscale y" >> $gnuplotScript
+    echo "set title \"Residuals\"" >> $gnuplotScript
+    echo "set xlabel \"$xAxisLabel\"" >> $gnuplotScript
+    echo "set ylabel \"Residual\"" >> $gnuplotScript
+    echo "set grid" >> $gnuplotScript
+    echo "plot \\" >> $gnuplotScript
+    
+    # 各列をプロット
+    i=1
+    firstPlot=true
+    for field in $labels; do
+        if [ "$field" != "#" ]; then
+            i=$(expr $i + 1)
+            if [ $i -le $numColumn ]; then
+                if [ "$firstPlot" = true ]; then
+                    echo "\"$residualsFile\" using 1:${i} with lines title \"$field\" \\" >> $gnuplotScript
+                    firstPlot=false
+                elif [ $i -lt $numColumn ]; then
+                    echo ", \"$residualsFile\" using 1:${i} with lines title \"$field\" \\" >> $gnuplotScript
+                else
+                    echo ", \"$residualsFile\" using 1:${i} with lines title \"$field\"" >> $gnuplotScript
+                fi
+            fi
+        fi
+    done
+    
+    # gnuplotを実行
+    if command -v gnuplot > /dev/null 2>&1; then
+        gnuplot $gnuplotScript
+        echo "Residualsのグラフを 'residuals.png' に保存しました。"
+    else
+        echo "警告: gnuplotが見つかりません。"
+    fi
+
+    mv residuals.png ..
+    
+    rm -f $gnuplotScript
+    echo "========================================="
+    echo ""
+fi
+
+runApplication reconstructPar
+rm -rf ./processor*
+
+# 計算終了時にCd値を表示
+forceCoeffsFile="postProcessing/forceCoeffs/0/forceCoeffs.dat"
+if [ -f "$forceCoeffsFile" ]; then
+    echo ""
+    echo "========================================="
+    echo "計算終了時のCd値（抗力係数）:"
+    echo "========================================="
+    # ヘッダー行からCd列の位置を特定（タブ区切りを考慮）
+    cdColumn=$(grep -E '^#.*Cd' "$forceCoeffsFile" | head -1 | awk -F'\t' '{
+        for(i=1;i<=NF;i++) {
+            # 列名から空白を除去して比較
+            gsub(/^[ \t]+|[ \t]+$/, "", $i);
+            if($i=="Cd") print i
+        }
+    }')
+    if [ -n "$cdColumn" ]; then
+        # タブ区切りでCd列を取得
+        finalCd=$(tail -1 "$forceCoeffsFile" | awk -F'\t' -v col="$cdColumn" '{print $col}')
+        if [ -n "$finalCd" ] && [ "$finalCd" != "#" ]; then
+            echo "Cd = $finalCd"
+        else
+            echo "Cd値の取得に失敗しました。"
+            echo "forceCoeffs.datの最終5行:"
+            tail -5 "$forceCoeffsFile"
+        fi
+    else
+        # ヘッダーが見つからない場合、3列目を試す（一般的な順序: Time, Cm, Cd, Cl）
+        finalCd=$(tail -1 "$forceCoeffsFile" | awk -F'\t' '{print $3}')
+        if [ -n "$finalCd" ] && [ "$finalCd" != "#" ]; then
+            echo "Cd = $finalCd"
+        else
+            echo "Cd値の取得に失敗しました。"
+            echo "forceCoeffs.datの内容:"
+            head -3 "$forceCoeffsFile"
+            echo "..."
+            tail -3 "$forceCoeffsFile"
+        fi
+    fi
+    echo "========================================="
+    echo ""
+    # Cd値を一つ上の階層にも保存
+    cdSaveFile="../finalCd.txt"
+    if [ -n "$finalCd" ]; then
+        echo "$finalCd" > "$cdSaveFile"
+    fi
+fi
+
+# 計算終了後にparaviewでsaveFig.pyを実行
+echo ""
+echo "========================================="
+echo "ParaViewで可視化画像を生成中..."
+echo "========================================="
+if command -v pvpython > /dev/null 2>&1; then
+    pvpython saveFig.py
+elif command -v paraview > /dev/null 2>&1; then
+    paraview --script=saveFig.py --disable-output
+else
+    echo "警告: ParaViewが見つかりません。saveFig.pyを手動で実行してください。"
+fi
+echo "========================================="
+echo ""

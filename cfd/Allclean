@@ -1,0 +1,33 @@
+#!/bin/sh
+cd ${0%/*} || exit 1
+. $WM_PROJECT_DIR/bin/tools/CleanFunctions
+show_help() {
+    echo "Usage: Allclean [OPTIONS]"
+    echo "options:"
+    echo "  -h, --help                 print the usage"
+    echo ""
+    exit 1
+}
+optionOld=$OPTIND
+OPTIND=1
+onlyTimeDirectories=0
+while getopts "ht-:" opt; do
+    case "$opt" in
+    -)
+        case "${OPTARG}" in
+            help) show_help;;
+            onlyTimeDirectories) onlyTimeDirectories=true;;
+        esac ;;
+    t) onlyTimeDirectories=true;;
+    h) show_help;;
+    esac
+done
+shift $((OPTIND-1))
+OPTIND=$optionOld
+
+if [ "$onlyTimeDirectories" = true ] ; then
+    echo "This option is obsolete, because it was removed in OpenFOAM 8."
+else
+    rm -rf constant/extendedFeatureEdgeMesh > /dev/null 2>&1
+    cleanCase
+fi

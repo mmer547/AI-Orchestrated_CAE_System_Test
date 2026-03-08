@@ -1,0 +1,210 @@
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "system";
+    object      snappyHexMeshDict;
+}
+castellatedMesh true;
+snap            true;
+addLayers       true;
+geometry
+{
+  solid
+  {
+    type triSurfaceMesh;
+    file "solid.stl";
+    regions
+    {
+      wall
+      {
+        name wall;
+      }
+    }
+  }
+  // outer
+  // {
+  //   type triSurfaceMesh;
+  //   file "outer.stl";
+  //   regions
+  //   {
+  //     XMax0
+  //     {
+  //       name XMax0;
+  //     }
+  //     XMin0
+  //     {
+  //       name XMin0;
+  //     }
+  //     YMax0
+  //     {
+  //       name YMax0;
+  //     }
+  //     YMin0
+  //     {
+  //       name YMin0;
+  //     }
+  //     ZMax0
+  //     {
+  //       name ZMax0;
+  //     }
+  //     ZMin0
+  //     {
+  //       name ZMin0;
+  //     }
+  //   }
+  // }
+}
+castellatedMeshControls
+{
+  features (
+    {
+      file "solid.eMesh";
+      level 1;
+    }
+    // {
+    //   file "outer.eMesh";
+    //   level 1;
+    // }
+  );
+  refinementSurfaces
+  {
+    solid
+    {
+      level (0 0);
+      regions
+      {
+        wall
+        {
+          level (2 4);
+          patchInfo
+          {
+            type wall;
+          }
+        }
+      }
+    }
+    // outer
+    // {
+    //   level (0 0);
+    //   regions
+    //   {
+    //     XMax0
+    //     {
+    //       level (0 0);
+    //       patchInfo
+    //       {
+    //         type patch;
+    //       }
+    //     }
+    //     XMin0
+    //     {
+    //       level (0 0);
+    //       patchInfo
+    //       {
+    //         type patch;
+    //       }
+    //     }
+    //     YMax0
+    //     {
+    //       level (0 0);
+    //       patchInfo
+    //       {
+    //         type wall;
+    //       }
+    //     }
+    //     YMin0
+    //     {
+    //       level (0 0);
+    //       patchInfo
+    //       {
+    //         type wall;
+    //       }
+    //     }
+    //     ZMax0
+    //     {
+    //       level (0 0);
+    //       patchInfo
+    //       {
+    //         type wall;
+    //       }
+    //     }
+    //     ZMin0
+    //     {
+    //       level (0 0);
+    //       patchInfo
+    //       {
+    //         type wall;
+    //       }
+    //     }
+    //   }
+    // }
+  }
+  refinementRegions {}
+  locationInMesh (5.0 0.4999999999999999 0.4999999999999999);
+  maxLocalCells 100000000;
+  maxGlobalCells 100000000;
+  minRefinementCells 1;
+  nCellsBetweenLevels 3;
+  resolveFeatureAngle 30;
+  allowFreeStandingZoneFaces false;
+}
+snapControls
+{
+  nSolveIter 30;
+  nSmoothPatch 3;
+  tolerance 4.0;
+  nRelaxIter 5;
+  nFeatureSnapIter 10;
+}
+addLayersControls
+{
+  layers
+  {
+  wall
+  {
+    nSurfaceLayers 3;
+  }
+  }
+  relativeSizes true;
+  expansionRatio 1.0;
+  finalLayerThickness 0.3;
+  minThickness 0.03;
+  nGrow 1;
+  featureAngle 60;
+  nRelaxIter 5;
+  nSmoothSurfaceNormals 1;
+  nSmoothNormals 3;
+  nSmoothThickness 10;
+  maxFaceThicknessRatio 0.5;
+  maxThicknessToMedialRatio 0.3;
+  minMedianAxisAngle 130;
+  nBufferCellsNoExtrude 0;
+  nLayerIter 50;
+  nRelaxedIter 20;
+}
+meshQualityControls
+{
+  maxNonOrtho 65;
+  maxBoundarySkewness 20;
+  maxInternalSkewness 4;
+  maxConcave 80;
+  minFlatness 0.5;
+  minVol 1.00E-13;
+  minTetQuality -1e30;
+  minArea -1;
+  minTwist 0.05;
+  minDeterminant 0.001;
+  minFaceWeight 0.05;
+  minVolRatio 0.01;
+  minTriangleTwist -1;
+  nSmoothScale 4;
+  errorReduction 0.75;
+  relaxed
+  {
+    maxNonOrtho 180;
+  }
+}
+debug 0;
+mergeTolerance 1e-5;
